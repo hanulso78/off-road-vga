@@ -132,21 +132,23 @@ def mats_for(a):
         return {2: 'red', 3: 'steel', 1: 'green'}, 'truck'
     if a == 0x6c2a:
         return {1: 'green', 2: 'green', 3: 'gold'}, ''
-    if a == 0x6c40:
+    if 0x6c40 <= a <= 0x6c9e:
         return {2: 'stone', 1: 'stone', 3: 'stone'}, 'rock'
     if a == 0x6ccf:
         return {3: 'fire', 2: 'fire', 1: 'fire'}, 'glow'
     if 0x6cda <= a <= 0x6de8:
         return {3: 'fire', 2: 'red', 1: 'fire'}, 'fire'      # 트럭이 부서질 때 먼지/불 구름
-    if a in (0x71ff, 0x7232):
-        return {1: 'gold', 2: 'gold', 3: 'gold'}, 'glow'
-    if a in (0x728d, 0x72b3):
-        return {3: 'wood', 2: 'red', 1: 'wood'}, ''
+    if 0x71ff <= a <= 0x7263 or a == 0x7ab4:
+        return {1: 'gold', 2: 'gold', 3: 'gold'}, 'glow'      # 점수 숫자, NEW LEVEL
+    if 0x728d <= a <= 0x72b3:
+        return {3: 'wood', 2: 'red', 1: 'wood'}, ''          # 새 날갯짓
     if 0x72d7 <= a <= 0x76c3:
         return {3: 'steel', 2: 'red', 1: 'green'}, ''
     if a == 0x7729:
         return {3: 'steel', 2: 'red', 1: 'green'}, ''
-    if 0x784e <= a <= 0x7a10:
+    if a == 0x776e:
+        return {2: 'red', 3: 'steel', 1: 'green'}, ''         # 적 버기카
+    if 0x77ca <= a <= 0x7a6c:
         return {3: 'wood', 2: 'wood', 1: 'wood'}, 'crate'
     if a in (0x7af6, 0x7afe):
         return {2: 'red', 3: 'gold', 1: 'green'}, 'glow'

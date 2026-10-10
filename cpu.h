@@ -82,12 +82,15 @@ void orvga_hook(uint32_t at);
 #define VH(a) orvga_hook(a)
 void trk_wb(uint32_t a, uint8_t v);
 #define IS_TRK(a) ((uint32_t)((a) - 0xB8000u) < 0x4000u)
-#define MWB(a, v) do { uint32_t a__ = (a); if (IS_TRK(a__)) trk_wb(a__, (v)); else M[a__] = (v); } while (0)
+extern int orvga_trk;                   /* 글자/지우기 중일 때만 꼬리표를 따라간다 */
+#define MWB(a, v) do { uint32_t a__ = (a); if (orvga_trk && IS_TRK(a__)) trk_wb(a__, (v)); else M[a__] = (v); } while (0)
 #else
 #define VH(a) ((void)0)
 /* CGA 판: 화면 메모리 80 바이트 줄마다 '바뀜' 표시 (도스판이 바뀐 줄만 옮긴다) */
-extern uint8_t cga_dirty[208];
-#define MWB(a, v) do { uint32_t a__ = (a); M[a__] = (v);         if ((uint32_t)(a__ - 0xB8000u) < 0x4000u) cga_dirty[(a__ - 0xB8000u) / 80] = 1; } while (0)
+/* 64 바이트 토막마다 (나눗셈 없이 시프트) */
+extern uint8_t cga_dirty[256];
+#define CGA_MARK(a) do { uint32_t d__ = (a) - 0xB8000u; if (d__ < 0x4000u) cga_dirty[d__ >> 6] = 1; } while (0)
+#define MWB(a, v) do { uint32_t a__ = (a); M[a__] = (v); CGA_MARK(a__); } while (0)
 #endif
 
 static inline __attribute__((always_inline)) uint8_t RB(uint16_t s, uint16_t o)
@@ -95,9 +98,12 @@ static inline __attribute__((always_inline)) uint8_t RB(uint16_t s, uint16_t o)
     return M[LIN(s, o)];
 }
 
+/* 낱말은 한 번에 (x86 은 어긋난 16비트 접근도 된다).  오프셋 FFFF 만 세그먼트 안에서 감긴다 */
 static inline __attribute__((always_inline)) uint16_t RW(uint16_t s, uint16_t o)
 {
-    return (uint16_t)(M[LIN(s, o)] | (M[LIN(s, (uint16_t)(o + 1))] << 8));
+    if (__builtin_expect(o == 0xFFFF, 0))
+        return (uint16_t)(M[LIN(s, o)] | (M[LIN(s, 0)] << 8));
+    return *(const uint16_t *)(M + LIN(s, o));
 }
 
 static inline __attribute__((always_inline)) void WB(uint16_t s, uint16_t o, uint8_t v)
@@ -107,8 +113,21 @@ static inline __attribute__((always_inline)) void WB(uint16_t s, uint16_t o, uin
 
 static inline __attribute__((always_inline)) void WW(uint16_t s, uint16_t o, uint16_t v)
 {
-    MWB(LIN(s, o), (uint8_t)v);
-    MWB(LIN(s, (uint16_t)(o + 1)), (uint8_t)(v >> 8));
+    uint32_t a = LIN(s, o);
+#ifdef ORVGA
+    if (__builtin_expect(o == 0xFFFF || (orvga_trk && (IS_TRK(a) || IS_TRK(a + 1))), 0)) {
+#else
+    if (__builtin_expect(o == 0xFFFF, 0)) {
+#endif
+        MWB(a, (uint8_t)v);
+        MWB(LIN(s, (uint16_t)(o + 1)), (uint8_t)(v >> 8));
+        return;
+    }
+    *(uint16_t *)(M + a) = v;
+#ifndef ORVGA
+    CGA_MARK(a);
+    CGA_MARK(a + 1);
+#endif
 }
 
 static inline __attribute__((always_inline)) void PUSH(uint16_t v)

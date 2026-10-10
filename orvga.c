@@ -41,6 +41,7 @@ extern const uint16_t orv_stars[];
 extern const uint8_t or_romfont[1024];
 
 int orvga_on;
+int orvga_trk;
 static uint8_t pal[768];
 static uint32_t palgen = 1;
 static int cur_theme = -1;
@@ -79,8 +80,8 @@ static int susp_prev_y = TRUCK_GROUND;
 static int body_dy, wheel_dy;
 static uint8_t cov[64000];              /* 스프라이트 덮개 (cov_stamp 와 같으면 이번 프레임) */
 static uint8_t cov_stamp;
-/* 점수판 결과 캐시 */
-static uint8_t hud_cga[1600], hud_lab[20 * 320], hud_out[20 * 320];
+/* 점수판 결과 캐시: 점수판(0..19 줄)은 글자 그리기(24B0)로만 바뀐다 -> trk_wb 가 hud_ok = 0 */
+static uint8_t hud_out[20 * 320];
 static int hud_ok;
 static uint8_t rowlab[200];             /* 이 줄에 글자 꼬리표가 (한 번이라도) 있나 */
 
@@ -147,6 +148,7 @@ void orvga_mode(int mode)
     (void)mode;
     susp_t = body_dy = wheel_dy = 0;
     hud_ok = 0;
+    orvga_trk = 0;
     susp_prev_y = TRUCK_GROUND;
     ninst = 0;
     memset(lab, 0, sizeof lab);
@@ -178,7 +180,14 @@ static void spr_toggle(void)
     inst[ninst++] = n;
 }
 
+static void orvga_hook2(uint32_t at);
 void orvga_hook(uint32_t at)
+{
+    orvga_hook2(at);
+    orvga_trk = ctx == C_TEXT || ctx == C_CLEAR;
+}
+
+static void orvga_hook2(uint32_t at)
 {
     switch (at - CODEL) {
     case 0x2455:
@@ -197,6 +206,7 @@ void orvga_hook(uint32_t at)
             if (!(inst[k].y >= 0x15 && inst[k].y < 0xB4))
                 inst[j++] = inst[k];
         ninst = j;
+        memset(rowlab + 0x15, 0, 0xB4 - 0x15);      /* 꼬리표도 trk_wb 가 지운다 */
         ctx = C_CLEAR;
         break;
     }
@@ -218,6 +228,13 @@ void orvga_hook(uint32_t at)
     }
 }
 
+void orvga_clear_row(int y)
+{
+    memset(lab + y * 320, 0, 320);
+    if (y < 20)
+        hud_ok = 0;
+}
+
 /* CGA 화면 쓰기 (cpu.h MWB): 글자 꼬리표 */
 void trk_wb(uint32_t a, uint8_t v)
 {
@@ -231,6 +248,8 @@ void trk_wb(uint32_t a, uint8_t v)
         return;
     y = (int)(oo / 80) * 2 + (o >= 0x2000);
     xb = (int)(oo % 80);
+    if (y < 20)
+        hud_ok = 0;
     for (k = 0; k < 4; k++) {
         int nv = (v >> (6 - 2 * k)) & 3, p = y * 320 + xb * 4 + k;
         if (ctx == C_TEXT && nv) {
@@ -247,9 +266,18 @@ void trk_wb(uint32_t a, uint8_t v)
 }
 
 /* ---- 합성 ---- */
+static const uint16_t cga_row[200] = {
+#define R4(y) ((y) & 1) * 0x2000 + ((y) >> 1) * 80
+#define R8(y) R4(y), R4(y + 1), R4(y + 2), R4(y + 3), R4(y + 4), R4(y + 5), R4(y + 6), R4(y + 7)
+    R8(0), R8(8), R8(16), R8(24), R8(32), R8(40), R8(48), R8(56), R8(64), R8(72), R8(80), R8(88), R8(96),
+    R8(104), R8(112), R8(120), R8(128), R8(136), R8(144), R8(152), R8(160), R8(168), R8(176), R8(184), R8(192)
+#undef R8
+#undef R4
+};
+
 static inline int cga_px(int x, int y)
 {
-    uint8_t b = M[0xB8000 + (y & 1) * 0x2000 + (y >> 1) * 80 + (x >> 2)];
+    uint8_t b = M[0xB8000 + cga_row[y] + (x >> 2)];
     return (b >> (6 - 2 * (x & 3))) & 3;
 }
 
@@ -295,6 +323,15 @@ static uint8_t grass0[512], grass1[512], gndrow[20][512];   /* 두 번 이어 �
 static uint8_t skycol[200];
 static uint8_t texm[64 * 128];
 static uint8_t mcol[200][16];           /* (능선 아래 깊이, 결) -> 색 */
+/* 빠른 복사 (rep movsd + 나머지 바이트): 386/486 에서 memcpy 부르는 값도 아낀다 */
+static inline void cpy(uint8_t *d, const uint8_t *s, unsigned n)
+{
+    unsigned q = n >> 2, r = n & 3;
+    __asm__ __volatile__("cld\n\trep movsl" : "+D"(d), "+S"(s), "+c"(q) : : "memory");
+    if (r)
+        __asm__ __volatile__("rep movsb" : "+D"(d), "+S"(s), "+c"(r) : : "memory");
+}
+
 /* 하늘+먼 산 넓은 그림 (줄 20..179, 폭 1024 + 320 이어 붙임): 줄마다 memcpy */
 #define FARW (1024 + 320)
 static uint8_t farimg[160][FARW];
@@ -319,7 +356,7 @@ static void wcol_paint(int w, int r)
 
 /* 능선 단조 조각: 줄마다 산이 덮는 구간 (r(x) <= y) 의 경계만 옮긴다 */
 static struct piece {
-    int16_t a, b, dir, c;
+    int16_t a, b, dir, c, lo, hi;       /* lo/hi = 조각 안 능선 가장 높은/낮은 줄 */
 } pcs[320];
 static int npcs;
 
@@ -377,11 +414,11 @@ void orvga_frame(uint8_t *dst)
         for (x = 0; x < 320; x++, si = si + 1 == 0xC77 ? 0 : si + 1) {
             int r = M[DSL + 0x417E + si];
             ridge[x] = (r >= 0x15 && r < 0xB4) ? r : 999;
-            if (ridge[x] != 999 && cga_px(x, r))
+            if (!(x & 7) && ridge[x] != 999 && cga_px(x, r))
                 ok++;
         }
         /* 글자/스프라이트가 덮은 열도 있으니 대부분 맞으면 표 전체를 믿는다 */
-        if (ok < 320 * 4 / 10)
+        if (ok < 40 * 4 / 10)
             for (x = 0; x < 320; x++)
                 ridge[x] = 999;
     }
@@ -414,17 +451,26 @@ void orvga_frame(uint8_t *dst)
                 p->b = (int16_t)(x - 1);
                 p->dir = (int16_t)dir;
                 p->c = (int16_t)(dir >= 0 ? p->a : p->b + 1);
+                /* 단조 조각이라 가장 높은/낮은 줄은 양 끝 */
+                p->lo = (int16_t)(dir >= 0 ? ridge[p->a] : ridge[p->b]);
+                p->hi = (int16_t)(dir >= 0 ? ridge[p->b] : ridge[p->a]);
             }
         }
         for (y = 20; y < 0xB4; y++) {
             uint8_t *d = dst + y * 320;
             const uint8_t *wr = wimg[y - 20] + s0;
             const uint8_t *fr = farimg[y - 20] + fo;
-            int cx = 0;
+            int cx = 0, rs = -1, re = -1;
             for (k = 0; k < npcs; k++) {
                 struct piece *p = &pcs[k];
                 int x0, x1;
-                if (p->dir >= 0) {
+                if (y < p->lo)
+                    continue;                   /* 이 줄엔 아직 산 없음 */
+                if (y >= p->hi) {
+                    x0 = p->a;                  /* 조각 전체가 산 */
+                    x1 = p->b + 1;
+                    p->c = (int16_t)(p->dir >= 0 ? x1 : x0);
+                } else if (p->dir >= 0) {
                     while (p->c <= p->b && ridge[p->c] <= y)
                         p->c++;
                     x0 = p->a;
@@ -435,15 +481,29 @@ void orvga_frame(uint8_t *dst)
                     x0 = p->c;
                     x1 = p->b + 1;
                 }
-                if (x1 > x0) {
-                    if (x0 > cx)
-                        memcpy(d + cx, fr + cx, (size_t)(x0 - cx));
-                    memcpy(d + x0, wr + x0, (size_t)(x1 - x0));
-                    cx = x1;
+                if (x1 <= x0)
+                    continue;
+                if (x0 == re) {                 /* 앞 구간에 이어짐 */
+                    re = x1;
+                    continue;
                 }
+                if (rs >= 0) {
+                    if (rs > cx)
+                        cpy(d + cx, fr + cx, (unsigned)(rs - cx));
+                    cpy(d + rs, wr + rs, (unsigned)(re - rs));
+                    cx = re;
+                }
+                rs = x0;
+                re = x1;
+            }
+            if (rs >= 0) {
+                if (rs > cx)
+                    cpy(d + cx, fr + cx, (unsigned)(rs - cx));
+                cpy(d + rs, wr + rs, (unsigned)(re - rs));
+                cx = re;
             }
             if (cx < 320)
-                memcpy(d + cx, fr + cx, (size_t)(320 - cx));
+                cpy(d + cx, fr + cx, (unsigned)(320 - cx));
         }
     }
     /* 2) 점수판, 땅 */
@@ -496,8 +556,7 @@ void orvga_frame(uint8_t *dst)
     /* 3) CGA 화면에서 0 이 아닌 점: 글자 / 그 밖 (땅 띠의 초록은 땅)
      *    점수판(0..19 줄)은 배경이 고정이라 CGA 바이트와 꼬리표가 그대로면 지난 결과를 쓴다 */
     y = 0;
-    if (hud_ok && !memcmp(hud_cga, M + 0xB8000, 800) && !memcmp(hud_cga + 800, M + 0xBA000, 800) &&
-        !memcmp(hud_lab, lab, sizeof hud_lab)) {
+    if (hud_ok) {
         memcpy(dst, hud_out, sizeof hud_out);
         y = 20;
     }
@@ -507,9 +566,6 @@ void orvga_frame(uint8_t *dst)
         uint8_t *d = dst + y * 320;
         int gnd = y >= 0xB4;
         if (y == 20 && !hud_ok) {
-            memcpy(hud_cga, M + 0xB8000, 800);
-            memcpy(hud_cga + 800, M + 0xBA000, 800);
-            memcpy(hud_lab, lab, sizeof hud_lab);
             memcpy(hud_out, dst, sizeof hud_out);
             hud_ok = 1;
         }
@@ -521,9 +577,20 @@ void orvga_frame(uint8_t *dst)
             if (x == 20)
                 continue;
         }
+        int rl = rowlab[y];
+        /* 글자 없는 줄: 스프라이트(목록)/능선(표)/땅(무늬) 밖의 CGA 점은 없다 -> 건너뜀 */
+        if (!rl && y >= 20)
+            continue;
         for (x = 0; x < 80; x++) {
             uint8_t b;
             int k;
+            if ((x & 15) == 0) {
+                const uint32_t *w4 = (const uint32_t *)(src + x);
+                if (!(w4[0] | w4[1] | w4[2] | w4[3])) {
+                    x += 15;
+                    continue;
+                }
+            }
             if ((x & 3) == 0 && !*(const uint32_t *)(src + x)) {
                 x += 3;
                 continue;

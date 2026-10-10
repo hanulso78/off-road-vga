@@ -18,3 +18,8 @@ __pycache__/
 ORTEST.TXT
 ORLOG.TXT
 OROUT.TXT
+/hostref.exe
+/hosttrc.exe
+/hostprof.exe
+/orct.exe
+/orvp.exe

@@ -279,11 +279,11 @@ static void present(void)
         shown_color = or_cga_color;
     }
 #ifndef ORVGA
-    /* 바뀐 80 바이트 토막만 옮긴다 (cpu.h MWB 가 표시): 화면 메모리 쓰기는 ISA 에서 느리다 */
+    /* 바뀐 64 바이트 토막만 옮긴다 (cpu.h MWB 가 표시): 화면 메모리 쓰기는 ISA 에서 느리다 */
     {
         int k, any = 0;
-        for (k = 0; k < 205; k++) {
-            uint32_t o = (uint32_t)k * 80, n = k == 204 ? 0x4000 - 204 * 80 : 80;
+        for (k = 0; k < 256; k++) {
+            uint32_t o = (uint32_t)k * 64, n = 64;
             if (shown_valid && !cga_dirty[k])
                 continue;
             cga_dirty[k] = 0;
@@ -432,7 +432,22 @@ void plat_mode(int mode)
 #endif
 }
 
+static uclock_t t_tick_end, st_game;
+static long st_ngame;
+static void plat_tick2(uint32_t tick);
+
+/* 틱 사이 = 게임 계산 시간 (화면 내보내기, 기다림 빼고) 을 잰다 (ORLOG) */
 void plat_tick(uint32_t tick)
+{
+    if (t_tick_end && tick > 50) {
+        st_game += uclock() - t_tick_end;
+        st_ngame++;
+    }
+    plat_tick2(tick);
+    t_tick_end = uclock();
+}
+
+static void plat_tick2(uint32_t tick)
 {
     pace();
     if (test_on) {
@@ -443,10 +458,19 @@ void plat_tick(uint32_t tick)
                 FILE *f = fopen("ORLOG.TXT", "w");
                 if (f) {
                     double el = (double)(uclock() - t_run0) / UCLOCKS_PER_SEC;
-                    fprintf(f, "tick %lu in %.1f s (%.1f frames/s), presents %ld avg %.2f ms (compose %.2f), behind %ld, skipped %ld\n",
+                    fprintf(f, "tick %lu in %.1f s (%.1f frames/s), presents %ld avg %.2f ms (compose %.2f), game %.2f ms/frame, behind %ld, skipped %ld\n",
                             (unsigned long)tick, el, el > 0 ? tick / el : 0.0, st_pres,
                             st_pres ? (double)st_prest * 1000.0 / UCLOCKS_PER_SEC / st_pres : 0.0,
-                            st_pres ? (double)st_comp * 1000.0 / UCLOCKS_PER_SEC / st_pres : 0.0, st_behind, st_skip);
+                            st_pres ? (double)st_comp * 1000.0 / UCLOCKS_PER_SEC / st_pres : 0.0,
+                            st_ngame ? (double)st_game * 1000.0 / UCLOCKS_PER_SEC / st_ngame : 0.0, st_behind, st_skip);
+#ifdef ORVPROF
+                    {
+                        extern long long prof_t[16];
+                        int i;
+                        for (i = 0; i < 8; i++)
+                            fprintf(f, "part %d: %.2f ms/present\n", i, st_pres ? (double)prof_t[i] * 1000.0 / UCLOCKS_PER_SEC / st_pres : 0.0);
+                    }
+#endif
                     fclose(f);
                 }
                 leave(0);
@@ -459,9 +483,9 @@ void plat_tick(uint32_t tick)
             return;
         }
     }
-    /* 느린 PC: 원판 시각보다 30ms 넘게 뒤처졌으면 이번 화면은 건너뛴다 (게임 빠르기는 그대로,
+    /* 느린 PC: 원판 시각보다 15ms 넘게 뒤처졌으면 이번 화면은 건너뛴다 (게임 빠르기는 그대로,
      * 화면만 성기게).  그래도 세 프레임에 한 번은 보인다 */
-    if (uclock() > pace_t + UCLOCKS_PER_SEC * 3 / 100 && nskip < 2) {
+    if (uclock() > pace_t + UCLOCKS_PER_SEC * 15 / 1000 && nskip < 2) {
         nskip++;
         st_skip++;
         return;

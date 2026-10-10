@@ -1,4 +1,4 @@
-; tools/sprites.py 로 모은 XOR 스프라이트 (자료 주소 DS:, 폭 바이트, 줄) -> tools/mkvga.py
+; XOR 스프라이트 (자료 주소 DS:, 폭 바이트, 줄): tools/sprites.py 로 모으고 코드의 포인터 표(mov si,[di+표])에서 보탬 -> tools/mkvga.py
 6be0 w5 h14
 6c2a w2 h7
 6c40 w5 h9
@@ -64,3 +64,17 @@
 85dd w11 h43
 87bc w2 h4
 87c6 w2 h4
+6c6f w5 h9
+6c9e w5 h9
+7210 w3 h5
+7221 w3 h5
+7248 w5 h5
+7263 w6 h5
+7297 w2 h4
+72a1 w2 h4
+72ab w2 h3
+776e w6 h12
+77ca w4 h15
+7808 w4 h17
+7a6c w4 h17
+7ab4 w12 h5

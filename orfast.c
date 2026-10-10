@@ -8,6 +8,7 @@
  *  번역판(or_code.c)과 같다.  플래그는 돌아간 뒤 쓰이지 않는다 (번역판도 계산하지 않음).
  *  tools/asm2c.py FAST 가 함수 첫 명령 앞에서 부른다: 0 이 아니면 돌아갈 곳 (ret 끝낸 뒤).
  * ========================================================================== */
+#include <string.h>
 #include "cpu.h"
 #include "plat.h"
 #ifdef ORVGA
@@ -98,9 +99,69 @@ static uint32_t fast_2987(void)
     }
 }
 
+/* 2A42 난수: AL = PIT0 + [4DFA] + [4DFB], 그리고 [4DF9..4DFB] 를 한 칸씩 민다 (AH 그대로) */
+static uint32_t fast_2a42(void)
+{
+    uint8_t a, b, s;
+    io_out(0x43, 0);
+    s = io_in(0x40);
+    a = RB(DS_, 0x4DFA);
+    b = RB(DS_, 0x4DFB);
+    s = (uint8_t)(s + a + b);
+    AL = s;
+    WW(SS_, (uint16_t)(SP - 2), AX);          /* push ax 가 남긴 값 */
+    WB(DS_, 0x4DF9, a);
+    WB(DS_, 0x4DFA, b);
+    WB(DS_, 0x4DFB, s);
+    {
+        uint16_t o = POP();
+        return CODEL + o;
+    }
+}
+
+/* 30F0 화면 21..179 줄 지우기 */
+static uint32_t fast_30f0(void)
+{
+    uint16_t row;
+    WW(DS_, 0x2C, 0);
+    for (row = 0x15; row < 0xB4; row++) {
+        uint16_t bx;
+        int i;
+        WW(DS_, 0x44, row);
+        bx = rowaddr(row);
+#ifdef ORVGA
+        /* 256색판: 꼬리표를 바이트마다 따라가지 않고 줄째로 (orvga_clear_row) */
+        if (LIN(ES_, bx) >= 0xB8000u && LIN(ES_, bx) + 0x50 <= 0xBC000u && (uint16_t)(bx + 0x4F) > bx) {
+            memset(M + LIN(ES_, bx), 0, 0x50);
+            orvga_clear_row(row);
+            bx = (uint16_t)(bx + 0x50);
+        } else
+#endif
+        for (i = 0; i < 0x50; i++, bx++)
+            WB(ES_, bx, 0);
+        BX = bx;
+        CYC(41 + 63 + 12 + 0x50 * 37 + 67);
+    }
+    WW(DS_, 0x44, 0xB4);
+    CX = 0;
+    WW(SS_, (uint16_t)(SP - 2), 0x3103);
+#ifdef ORVGA
+    orvga_hook(CODEL + 0x3119);
+#endif
+    CYC(20);
+    {
+        uint16_t o = POP();
+        return CODEL + o;
+    }
+}
+
 uint32_t or_fast(uint32_t at)
 {
     switch (at - CODEL) {
+    case 0x2A42:
+        return fast_2a42();
+    case 0x30F0:
+        return fast_30f0();
     case 0x2455:
         return fast_2455();
     case 0x2987:

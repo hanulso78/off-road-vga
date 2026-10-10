@@ -42,7 +42,9 @@ for _fn in ('vhooks.txt',):
             VHOOKS.add(_s * 16 + _o)
 # 손으로 옮긴 빠른 판 (orfast.c or_fast): 함수 첫 명령 앞에서 불러 0 이 아니면 그 돌아갈 곳으로
 FAST = {image.CSEG * 16 + 0x2455: ('or_fast', image.CSEG * 16 + 0x2455),
-        image.CSEG * 16 + 0x2987: ('or_fast', image.CSEG * 16 + 0x2987)}
+        image.CSEG * 16 + 0x2987: ('or_fast', image.CSEG * 16 + 0x2987),
+        image.CSEG * 16 + 0x2A42: ('or_fast', image.CSEG * 16 + 0x2A42),
+        image.CSEG * 16 + 0x30F0: ('or_fast', image.CSEG * 16 + 0x30F0)}
 
 names = {}
 NAMES_TXT = os.path.join(scan.HERE, 'names.txt')
@@ -928,7 +930,20 @@ def main():
         elif prev_m not in ENDS and NEXT[a] != prev_end and not (prev_m == 'int' and i.operands[0].imm in (0x19, 0x20)):
             w('    goto %s;' % lab(prev_end))
     w('')
+    # dispatch: 코드 범위면 레이블 주소 표 (GCC &&레이블) 로 바로, 아니면 switch
+    lo = image.CSEG * 16
+    hi = image.CEND
     w('dispatch:')
+    w('    {')
+    w('        static void *const dtab[0x%x] = {' % (hi - lo))
+    for a in sorted(DISPATCH):
+        if lo <= a < hi:
+            w('            [0x%x] = &&%s,' % (a - lo, lab(a)))
+    w('        };')
+    w('        uint32_t i_ = jkey - 0x%xu;' % lo)
+    w('        if (i_ < 0x%xu && dtab[i_])' % (hi - lo))
+    w('            goto *dtab[i_];')
+    w('    }')
     w('    switch (jkey) {')
     for a in sorted(DISPATCH):
         w('    case 0x%05x: goto %s;' % (a, lab(a)))

@@ -22,7 +22,7 @@
 
 uint8_t M[MEMSIZE];
 #ifndef ORVGA
-uint8_t cga_dirty[208];
+uint8_t cga_dirty[256];
 #endif
 reg16_t cpu_a, cpu_b, cpu_c, cpu_d;
 uint16_t SI, DI, BP, SP, CS_, DS_, ES_, SS_;
