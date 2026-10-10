@@ -1,0 +1,20 @@
+# 빌드 결과물
+*.o
+*.vo
+/obj_host/
+/orc.exe
+/orvga.exe
+/hosttest.exe
+/hostvga.exe
+/hostvgad.exe
+# 원판 실행 파일 (저장소에 넣지 않음 - 직접 구해서 orig/ 에 둔다)
+/OFFROAD.EXE
+/orig/
+# 시험/작업 찌꺼기
+_*
+__pycache__/
+*.BMP
+*.bmp
+ORTEST.TXT
+ORLOG.TXT
+OROUT.TXT

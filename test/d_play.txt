@@ -1,0 +1,14 @@
+3 +3
+8 +space
+13 +space
+40 +space
+60 +right
+62 +right
+64 +right
+80 +up
+100 shot S1
+120 +space
+150 +up
+200 shot S2
+300 shot S3
+400 quit

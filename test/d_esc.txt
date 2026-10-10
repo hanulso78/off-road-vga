@@ -1,0 +1,12 @@
+3 +3
+8 +space
+13 +space
+40 shot T1
+45 +space
+60 +right
+62 +right
+64 +right
+66 +up
+150 shot G1
+160 +esc
+400 quit
