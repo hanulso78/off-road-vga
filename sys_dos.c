@@ -476,9 +476,20 @@ int plat_key(uint32_t tick)
             return tev[tpos++].sc;
         return -1;
     }
-    if (kq_tail != kq_head) {
+    /* 원판은 프레임마다 BIOS 버퍼에서 키를 하나만 꺼낸다.  누르고 있는 키의 자동 반복이 버퍼에
+     * 쌓이면 새로 누른 키(오른쪽을 누른 채 위 = 점프)가 그 뒤로 밀리거나 가득 차서 버려진다.
+     * 그래서 자동 반복(이미 눌린 키의 누름 코드)은 BIOS 버퍼가 비었을 때만 넣는다. */
+    while (kq_tail != kq_head) {
+        static uint8_t held[128];
         int k = kq[kq_tail];
         kq_tail = (kq_tail + 1) & (KQ - 1);
+        if (k & 0x80)
+            held[k & 0x7F] = 0;
+        else if (held[k]) {
+            if (M[0x41A] != M[0x41C])
+                continue;               /* 반복인데 아직 앞 키가 남았다: 버림 */
+        } else
+            held[k] = 1;
         return k;
     }
     return -1;

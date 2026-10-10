@@ -45,8 +45,10 @@ static uint8_t pal[768];
 static uint32_t palgen = 1;
 static int cur_theme = -1;
 
-/* 글자 꼬리표: 0 = 아님, 1..16 = 글자 안 위치 (위 -> 아래) */
+/* 글자 꼬리표: 0 = 아님, (색 묶음 + 1) << 4 | 글자 안 위치 0..15 (위 -> 아래) */
 static uint8_t lab[64000];
+
+static const uint8_t txg[4] = {2, 2, 0, 1};      /* CGA 색 -> 글자 램프 (빨강 0, 금 1, 초록 2) */
 
 /* 그리는 중인 것 */
 enum { C_NONE, C_SPR, C_TEXT, C_CLEAR };
@@ -185,11 +187,12 @@ void orvga_hook(uint32_t at)
 void trk_wb(uint32_t a, uint8_t v)
 {
     uint32_t o = a - 0xB8000u, oo;
-    uint8_t old = M[a];
     int y, xb, k;
     M[a] = v;
     oo = o & 0x1FFF;
-    if (oo >= 8000 || (old == v && ctx != C_TEXT))
+    /* 꼬리표는 글자를 쓸 때와 화면을 지울 때만 바꾼다: 능선/스프라이트 XOR 가 글자를 지나가도
+     * 꼬리표(원래 글자 색)는 남아, 지나간 뒤 글자가 제 색으로 돌아온다 */
+    if (oo >= 8000 || (ctx != C_TEXT && ctx != C_CLEAR))
         return;
     y = (int)(oo / 80) * 2 + (o >= 0x2000);
     xb = (int)(oo % 80);
@@ -201,7 +204,7 @@ void trk_wb(uint32_t a, uint8_t v)
                 r = 0;
             if (r >= t_h)
                 r = t_h - 1;
-            lab[p] = (uint8_t)(1 + (t_h > 1 ? r * 15 / (t_h - 1) : 7));
+            lab[p] = (uint8_t)(((txg[nv] + 1) << 4) | (t_h > 1 ? r * 15 / (t_h - 1) : 7));
         } else if (!nv)
             lab[p] = 0;
     }
@@ -241,6 +244,7 @@ static int inst_alive(const struct inst *s)
 }
 
 static const uint8_t cga_fallback[4] = {0, 10, 12, 14};
+#define TEXT_SHADOW (100 + 16 * 3 + 0)          /* 강철 램프 가장 어두운 색 */
 static int ridge[320];
 
 /* 빠른 합성용 표 */
@@ -283,7 +287,6 @@ static struct piece {
 } pcs[320];
 static int npcs;
 
-static const uint8_t txg[4] = {2, 2, 0, 1};      /* CGA 색 -> 글자 램프 (빨강 0, 금 1, 초록 2) */
 
 static void make_tabs(void)
 {
@@ -428,9 +431,12 @@ void orvga_frame(uint8_t *dst)
                 int v = ex4[b][k], px = x * 4 + k;
                 if (!v)
                     continue;
-                if (L[px])
-                    d[px] = (uint8_t)(244 + txg[v] * 4 + (L[px] - 1) * 4 / 16);
-                else if (gnd ? v != 1 : y != ridge[px])
+                if (L[px]) {
+                    d[px] = (uint8_t)(244 + ((L[px] >> 4) - 1) * 4 + (L[px] & 15) / 4);
+                    /* 놀이 화면 위 글자: 오른쪽 아래 1점 그림자 (하늘/산과 떨어지게) */
+                    if (y >= 20 && y < 199 && px < 319 && !L[px + 321])
+                        d[px + 321] = TEXT_SHADOW;
+                } else if (gnd ? v != 1 : y != ridge[px])
                     d[px] = cga_fallback[v];
             }
         }
