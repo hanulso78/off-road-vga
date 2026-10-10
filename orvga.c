@@ -63,6 +63,8 @@ static struct inst {
     int16_t x, y;               /* 화면 점 (x = 바이트*4 + 밀기) */
     uint8_t w, h;               /* 바이트 폭, 줄 */
     int16_t spr;                /* orv_spr 번호 (-1 없음) */
+    uint8_t dead;               /* 화면에서 안 보인 연속 프레임 수 */
+    uint32_t born;              /* 목록에 들어온 틱 */
 } inst[NINST];
 static int ninst;
 
@@ -157,6 +159,34 @@ void orvga_mode(int mode)
 }
 
 /* ---- 갈고리 ---- */
+#ifdef ORVCHK
+static int inst_match(const struct inst *s);
+/* 시험: 트럭이 CGA 화면엔 있는데 목록에 없는 프레임 수 (원판 트럭 위치 [4170]/[4172]) */
+long orvchk_missing, orvchk_frames;
+static void orvga_check(void)
+{
+    struct inst t;
+    uint16_t px = DSW(0x4170);
+    int k;
+    if (title || DSW(0x4176) != 1)
+        return;
+    t.addr = 0x6BE0;
+    t.x = (int16_t)(M[DSL + 0x680E + px] * 4 + (M[DSL + 0x695C + px] >> 1));
+    t.y = (int16_t)DSW(0x4172);
+    t.w = 5;
+    t.h = 14;
+    orvchk_frames++;
+    if (inst_match(&t) < 75)
+        return;
+    for (k = 0; k < ninst; k++)
+        if (inst[k].addr == t.addr && inst[k].x == t.x && inst[k].y == t.y)
+            return;
+    if (!orvchk_missing)
+        fprintf(stderr, "truck missing from list at tick %lu\n", (unsigned long)or_ticks);
+    orvchk_missing++;
+}
+#endif
+
 static void spr_toggle(void)
 {
     struct inst n;
@@ -166,6 +196,7 @@ static void spr_toggle(void)
     n.y = (int16_t)DSW(0x2E);
     n.w = DL;
     n.h = CH;
+    /* 그리기/지우기는 목록 짝으로만 정한다 (겹친 XOR 가 있으면 화면으로는 판단할 수 없다) */
     for (k = 0; k < ninst; k++)
         if (inst[k].addr == n.addr && inst[k].x == n.x && inst[k].y == n.y && inst[k].w == n.w) {
             memmove(inst + k, inst + k + 1, (size_t)(ninst - k - 1) * sizeof inst[0]);
@@ -173,6 +204,8 @@ static void spr_toggle(void)
             return;
         }
     n.spr = (int16_t)find_spr(n.addr);
+    n.dead = 0;
+    n.born = or_ticks;
     if (ninst == NINST) {
         memmove(inst, inst + 1, (NINST - 1) * sizeof inst[0]);
         ninst--;
@@ -221,6 +254,9 @@ static void orvga_hook2(uint32_t at)
     case 0x0633:
         title = 0;
         susp_frame();
+#ifdef ORVCHK
+        orvga_check();
+#endif
         break;
     case 0x078B:
         title = 1;
@@ -280,6 +316,33 @@ static inline int cga_px(int x, int y)
     uint8_t b = M[0xB8000 + cga_row[y] + (x >> 2)];
     return (b >> (6 - 2 * (x & 3))) & 3;
 }
+
+#ifdef ORVCHK
+/* 시험: 스프라이트 점 가운데 CGA 화면 값이 스프라이트 값과 같은 비율 (%, 점이 없으면 -1) */
+static int inst_match(const struct inst *s)
+{
+    int W = s->w * 4, y, x, on = 0, n = 0;
+    for (y = 0; y < s->h; y++) {
+        int sy = s->y + y;
+        if (sy < 0 || sy >= 200)
+            continue;
+        for (x = 0; x < W; x++) {
+            int sx = s->x + x, sv;
+            uint8_t b;
+            if (sx < 0 || sx >= 320)
+                continue;
+            b = M[DSL + s->addr + y * s->w + (x >> 2)];
+            sv = (b >> (6 - 2 * (x & 3))) & 3;
+            if (!sv)
+                continue;
+            n++;
+            if (cga_px(sx, sy) == sv)
+                on++;
+        }
+    }
+    return n ? on * 100 / n : -1;
+}
+#endif
 
 /* 스프라이트가 화면에 아직 있나 (원판이 따로 지운 경우 목록에서 뺀다) */
 static int inst_alive(const struct inst *s)
@@ -523,7 +586,15 @@ void orvga_frame(uint8_t *dst)
     for (k = 0; k < ninst; k++) {
         struct inst *s = &inst[k];
         int W = s->w * 4;
-        if (!inst_alive(s)) {
+        /* 화면에서 안 보이면: 다른 XOR (폭발 구름 등) 가 겹쳐 상쇄된 것일 수 있다.
+         * 3 프레임 넘게 안 보이면 그리지 않되, 목록에서 빼는 것은 그동안 다시 그리기/지우기가
+         * 없었던 (원판이 따로 지워 버린) 것만.  매 프레임 다시 그리는 트럭 같은 것을 빼면
+         * 그리기/지우기 짝이 뒤집혀 사라진 채로 남는다 (한 번 그랬다) */
+        if (inst_alive(s))
+            s->dead = 0;
+        else if (s->dead < 255)
+            s->dead++;
+        if (s->dead >= 3 && or_ticks - s->born >= 8) {
             memmove(inst + k, inst + k + 1, (size_t)(ninst - k - 1) * sizeof inst[0]);
             ninst--;
             k--;

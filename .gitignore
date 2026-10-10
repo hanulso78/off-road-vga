@@ -23,3 +23,5 @@ OROUT.TXT
 /hostprof.exe
 /orct.exe
 /orvp.exe
+/hostchk.exe
+/hostdbg.exe

@@ -174,6 +174,12 @@ static void finish(void)
     if (trace)
         fclose(trace);
     trace = 0;
+#ifdef ORVCHK
+    {
+        extern long orvchk_missing, orvchk_frames;
+        printf("check: truck missing %ld / %ld frames\n", orvchk_missing, orvchk_frames);
+    }
+#endif
     printf("done: %lu ticks, %lu polls, %lu cycles\n", (unsigned long)or_ticks, (unsigned long)or_npoll, (unsigned long)or_cyc);
     exit(0);
 }
@@ -181,6 +187,13 @@ static void finish(void)
 void plat_tick(uint32_t tick)
 {
     int i;
+#ifdef ORVCHK
+    /* 도스판처럼 틱마다 합성 (목록 정리가 매 프레임 돈다) */
+    if (orvga_on && (or_vmode == 4 || or_vmode == 5)) {
+        static uint8_t px[64000];
+        orvga_frame(px);
+    }
+#endif
     for (i = 0; i < nshots; i++)
         if (shots[i].t == tick)
             save_bmp(shots[i].name);
