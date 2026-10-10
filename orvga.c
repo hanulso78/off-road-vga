@@ -79,6 +79,10 @@ static int susp_prev_y = TRUCK_GROUND;
 static int body_dy, wheel_dy;
 static uint8_t cov[64000];              /* 스프라이트 덮개 (cov_stamp 와 같으면 이번 프레임) */
 static uint8_t cov_stamp;
+/* 점수판 결과 캐시 */
+static uint8_t hud_cga[1600], hud_lab[20 * 320], hud_out[20 * 320];
+static int hud_ok;
+static uint8_t rowlab[200];             /* 이 줄에 글자 꼬리표가 (한 번이라도) 있나 */
 
 static void susp_frame(void)
 {
@@ -142,9 +146,11 @@ void orvga_mode(int mode)
 {
     (void)mode;
     susp_t = body_dy = wheel_dy = 0;
+    hud_ok = 0;
     susp_prev_y = TRUCK_GROUND;
     ninst = 0;
     memset(lab, 0, sizeof lab);
+    memset(rowlab, 0, sizeof rowlab);
     ctx = C_NONE;
 }
 
@@ -234,6 +240,7 @@ void trk_wb(uint32_t a, uint8_t v)
             if (r >= t_h)
                 r = t_h - 1;
             lab[p] = (uint8_t)(((txg[nv] + 1) << 4) | (t_h > 1 ? r * 15 / (t_h - 1) : 7));
+            rowlab[y] = 1;
         } else if (!nv)
             lab[p] = 0;
     }
@@ -412,7 +419,8 @@ void orvga_frame(uint8_t *dst)
         for (y = 20; y < 0xB4; y++) {
             uint8_t *d = dst + y * 320;
             const uint8_t *wr = wimg[y - 20] + s0;
-            memcpy(d, farimg[y - 20] + fo, 320);
+            const uint8_t *fr = farimg[y - 20] + fo;
+            int cx = 0;
             for (k = 0; k < npcs; k++) {
                 struct piece *p = &pcs[k];
                 int x0, x1;
@@ -427,9 +435,15 @@ void orvga_frame(uint8_t *dst)
                     x0 = p->c;
                     x1 = p->b + 1;
                 }
-                if (x1 > x0)
+                if (x1 > x0) {
+                    if (x0 > cx)
+                        memcpy(d + cx, fr + cx, (size_t)(x0 - cx));
                     memcpy(d + x0, wr + x0, (size_t)(x1 - x0));
+                    cx = x1;
+                }
             }
+            if (cx < 320)
+                memcpy(d + cx, fr + cx, (size_t)(320 - cx));
         }
     }
     /* 2) 점수판, 땅 */
@@ -459,6 +473,15 @@ void orvga_frame(uint8_t *dst)
             int sy = s->y + y;
             if (sy < 0 || sy >= 200)
                 continue;
+            if (s->spr >= 0) {
+                const uint8_t *ar = orv_art + orv_spr[s->spr].off + y * W;
+                uint8_t *cv = cov + sy * 320 + s->x;
+                int x0 = s->x < 0 ? -s->x : 0, x1 = s->x + W > 320 ? 320 - s->x : W;
+                for (x = x0; x < x1; x++)
+                    if (ar[x])
+                        cv[x] = cov_stamp;
+                continue;
+            }
             for (x = 0; x < W; x++) {
                 int sx = s->x + x;
                 uint8_t b;
@@ -470,21 +493,46 @@ void orvga_frame(uint8_t *dst)
             }
         }
     }
-    /* 3) CGA 화면에서 0 이 아닌 점: 글자 / 그 밖 (땅 띠의 초록은 땅) */
-    for (y = 0; y < 200; y++) {
+    /* 3) CGA 화면에서 0 이 아닌 점: 글자 / 그 밖 (땅 띠의 초록은 땅)
+     *    점수판(0..19 줄)은 배경이 고정이라 CGA 바이트와 꼬리표가 그대로면 지난 결과를 쓴다 */
+    y = 0;
+    if (hud_ok && !memcmp(hud_cga, M + 0xB8000, 800) && !memcmp(hud_cga + 800, M + 0xBA000, 800) &&
+        !memcmp(hud_lab, lab, sizeof hud_lab)) {
+        memcpy(dst, hud_out, sizeof hud_out);
+        y = 20;
+    }
+    for (; y < 200; y++) {
         const uint8_t *src = M + 0xB8000 + (y & 1) * 0x2000 + (y >> 1) * 80;
         const uint8_t *L = lab + y * 320;
         uint8_t *d = dst + y * 320;
         int gnd = y >= 0xB4;
+        if (y == 20 && !hud_ok) {
+            memcpy(hud_cga, M + 0xB8000, 800);
+            memcpy(hud_cga + 800, M + 0xBA000, 800);
+            memcpy(hud_lab, lab, sizeof hud_lab);
+            memcpy(hud_out, dst, sizeof hud_out);
+            hud_ok = 1;
+        }
+        if (gnd && !rowlab[y]) {
+            /* 땅 띠: 줄 전체가 초록(55h) 이면 땅 무늬 그대로 */
+            const uint32_t *w4 = (const uint32_t *)src;
+            for (x = 0; x < 20 && w4[x] == 0x55555555u; x++)
+                ;
+            if (x == 20)
+                continue;
+        }
         for (x = 0; x < 80; x++) {
             uint8_t b;
             int k;
-            if ((x & 3) == 0 && !(src[x] | src[x + 1] | src[x + 2] | src[x + 3])) {
+            if ((x & 3) == 0 && !*(const uint32_t *)(src + x)) {
                 x += 3;
                 continue;
             }
             b = src[x];
             if (!b)
+                continue;
+            /* 땅 띠는 거의 다 초록 바이트(55h): 글자가 없으면 땅 무늬 그대로 */
+            if (gnd && b == 0x55 && !(L[x * 4] | L[x * 4 + 1] | L[x * 4 + 2] | L[x * 4 + 3]))
                 continue;
             for (k = 0; k < 4; k++) {
                 int v = ex4[b][k], px = x * 4 + k;

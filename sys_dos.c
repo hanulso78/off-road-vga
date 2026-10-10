@@ -34,6 +34,8 @@ static uint8_t vbuf[64000];
 static uclock_t t_run0;
 static long st_pres, st_behind;
 static uclock_t st_prest, st_comp;
+static int nskip;
+static long st_skip;
 static volatile int quit_req;
 static int shown_valid;
 static uint8_t shown_color = 0xFF;
@@ -441,10 +443,10 @@ void plat_tick(uint32_t tick)
                 FILE *f = fopen("ORLOG.TXT", "w");
                 if (f) {
                     double el = (double)(uclock() - t_run0) / UCLOCKS_PER_SEC;
-                    fprintf(f, "tick %lu in %.1f s (%.1f frames/s), presents %ld avg %.2f ms (compose %.2f), behind %ld\n",
+                    fprintf(f, "tick %lu in %.1f s (%.1f frames/s), presents %ld avg %.2f ms (compose %.2f), behind %ld, skipped %ld\n",
                             (unsigned long)tick, el, el > 0 ? tick / el : 0.0, st_pres,
                             st_pres ? (double)st_prest * 1000.0 / UCLOCKS_PER_SEC / st_pres : 0.0,
-                            st_pres ? (double)st_comp * 1000.0 / UCLOCKS_PER_SEC / st_pres : 0.0, st_behind);
+                            st_pres ? (double)st_comp * 1000.0 / UCLOCKS_PER_SEC / st_pres : 0.0, st_behind, st_skip);
                     fclose(f);
                 }
                 leave(0);
@@ -457,6 +459,14 @@ void plat_tick(uint32_t tick)
             return;
         }
     }
+    /* 느린 PC: 원판 시각보다 30ms 넘게 뒤처졌으면 이번 화면은 건너뛴다 (게임 빠르기는 그대로,
+     * 화면만 성기게).  그래도 세 프레임에 한 번은 보인다 */
+    if (uclock() > pace_t + UCLOCKS_PER_SEC * 3 / 100 && nskip < 2) {
+        nskip++;
+        st_skip++;
+        return;
+    }
+    nskip = 0;
     present();
 }
 

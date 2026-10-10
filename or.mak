@@ -11,8 +11,8 @@ CFLAGS  = -O2 -march=i386 -mtune=i486 -Wall -Wno-unused-label -Wno-unused-variab
 # 옮긴 코드는 함수 하나가 커서 -O1 (hhmack: -O2 가 오히려 느렸다)
 CODEFLAGS = -O1 -march=i386 -mtune=i486 -w -fno-strict-aliasing
 
-ORIG    = or_code.o orimg.o orfont.o orrt.o sys_dos.o
-VGA     = or_code.vo orimg.o orfont.o orrt.vo sys_dos.vo orvga.vo orvgatab.o
+ORIG    = or_code.o orimg.o orfont.o orrt.o orfast.o sys_dos.o
+VGA     = or_code.vo orimg.o orfont.o orrt.vo orfast.vo sys_dos.vo orvga.vo orvgatab.o
 
 .PHONY: all vga clean
 

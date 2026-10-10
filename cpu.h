@@ -73,6 +73,7 @@ extern uint32_t or_cyc;
 #define CYC(n) (or_cyc += (n))
 /* 제자리 빈 되돌이 "loop $": CX 번 (0 이면 65536 번) 돌고 CX = 0 */
 void or_spin(uint32_t n);
+uint32_t or_fast(uint32_t at);          /* orfast.c: 손으로 옮긴 빠른 판 (0 = 없음) */
 #define SPIN() do { or_spin(CX ? CX : 0x10000u); CX = 0; } while (0)
 
 #ifdef ORVGA

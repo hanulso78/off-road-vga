@@ -6,21 +6,21 @@ cd "$(dirname "$0")"
 export PATH=/c/MSYS2/mingw64/bin:$PATH
 CC="gcc -O1 -w"
 mkdir -p obj_host
-for f in or_code orimg orfont orrt orvgatab; do
+for f in or_code orimg orfont orrt orfast orvgatab; do
     if [ ! -f obj_host/$f.o ] || [ $f.c -nt obj_host/$f.o ] || [ cpu.h -nt obj_host/$f.o ] || [ plat.h -nt obj_host/$f.o ]; then
         echo cc $f.c
         $CC -c $f.c -o obj_host/$f.o
     fi
 done
-$CC -o hosttest.exe tools/hosttest.c obj_host/or_code.o obj_host/orimg.o obj_host/orfont.o obj_host/orrt.o
+$CC -o hosttest.exe tools/hosttest.c obj_host/or_code.o obj_host/orimg.o obj_host/orfont.o obj_host/orrt.o obj_host/orfast.o
 echo built hosttest.exe
 [ "$1" = vga ] || exit 0
 CV="gcc -O1 -w -DORVGA"
-for f in or_code orrt orvga; do
+for f in or_code orrt orfast orvga; do
     if [ ! -f obj_host/$f.vo ] || [ $f.c -nt obj_host/$f.vo ] || [ cpu.h -nt obj_host/$f.vo ] || [ orvga.h -nt obj_host/$f.vo ]; then
         echo cc -DORVGA $f.c
         $CV -c $f.c -o obj_host/$f.vo
     fi
 done
-$CV -o hostvga.exe tools/hosttest.c obj_host/or_code.vo obj_host/orimg.o obj_host/orfont.o obj_host/orrt.vo obj_host/orvga.vo obj_host/orvgatab.o
+$CV -o hostvga.exe tools/hosttest.c obj_host/or_code.vo obj_host/orimg.o obj_host/orfont.o obj_host/orrt.vo obj_host/orfast.vo obj_host/orvga.vo obj_host/orvgatab.o
 echo built hostvga.exe

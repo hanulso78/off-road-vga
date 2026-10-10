@@ -1103,7 +1103,7 @@ L09239:
 
 /* ---- f_089d_2455 */
 L0ae25:
-    TR(0x0ae25); CYC(18); VH(0x0ae25); SI = RW(DS_, 0x36); /* 089d:2455 mov si, word ptr [0x36] */
+    TR(0x0ae25); CYC(18); VH(0x0ae25); { uint32_t k_ = or_fast(0x0ae25); if (k_) { jkey = k_; goto dispatch; } } SI = RW(DS_, 0x36); /* 089d:2455 mov si, word ptr [0x36] */
 L0ae29:
     TR(0x0ae29); CYC(41); BX = RW(DS_, 0x2e); /* 089d:2459 mov bx, word ptr [0x2e] */
     TR(0x0ae2d); PUSH(0x2460); goto L0aeca; /* 089d:245d call 0xaeca */
@@ -1588,7 +1588,7 @@ L0b356:
 
 /* ---- f_089d_2987 */
 L0b357:
-    TR(0x0b357); CYC(42); SI = RW(DS_, 0x417a); /* 089d:2987 mov si, word ptr [0x417a] */
+    TR(0x0b357); CYC(42); { uint32_t k_ = or_fast(0x0b357); if (k_) { jkey = k_; goto dispatch; } } SI = RW(DS_, 0x417a); /* 089d:2987 mov si, word ptr [0x417a] */
     TR(0x0b35b); WW(DS_, 0x2c, 0x0); /* 089d:298b mov word ptr [0x2c], 0 */
 L0b361:
     TR(0x0b361); CYC(36); CX = 0x4; /* 089d:2991 mov cx, 4 */

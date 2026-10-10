@@ -40,7 +40,9 @@ for _fn in ('vhooks.txt',):
         if ln:
             _s, _o = [int(x, 16) for x in ln[0].split(':')]
             VHOOKS.add(_s * 16 + _o)
-FAST = {}
+# 손으로 옮긴 빠른 판 (orfast.c or_fast): 함수 첫 명령 앞에서 불러 0 이 아니면 그 돌아갈 곳으로
+FAST = {image.CSEG * 16 + 0x2455: ('or_fast', image.CSEG * 16 + 0x2455),
+        image.CSEG * 16 + 0x2987: ('or_fast', image.CSEG * 16 + 0x2987)}
 
 names = {}
 NAMES_TXT = os.path.join(scan.HERE, 'names.txt')
