@@ -68,6 +68,32 @@ static int ninst;
 static uint32_t gscroll;        /* 땅 무늬 */
 static int title;
 
+/* ---- 트럭 서스펜션 (그림만: 게임 동작은 그대로) ----
+ * 트럭 높이 [4172] (땅 = 0A6, 위로 가면 작아짐).  공중이면 바퀴가 1점 처지고, 땅에 닿는
+ * 프레임부터 차체가 2점 내려앉았다 1점 튀어 오르고 제자리로.  트럭 그림 6BE0: 0-6 줄 차체, 8-13 줄 바퀴 */
+#define TRUCK_SPR 0x6BE0
+#define TRUCK_GROUND 0xA6
+static const int8_t susp_body[] = {2, 2, 1, 0, -1, -1, 0};
+static int susp_t;              /* 0 = 쉼, 1.. = 착지 뒤 몇째 프레임 */
+static int susp_prev_y = TRUCK_GROUND;
+static int body_dy, wheel_dy;
+static uint8_t cov[64000];              /* 스프라이트 덮개 (cov_stamp 와 같으면 이번 프레임) */
+static uint8_t cov_stamp;
+
+static void susp_frame(void)
+{
+    int y = DSW(0x4172);
+    if (y < TRUCK_GROUND)
+        susp_t = 0;
+    else if (susp_prev_y < TRUCK_GROUND)
+        susp_t = 1;
+    else if (susp_t && ++susp_t > (int)sizeof susp_body)
+        susp_t = 0;
+    susp_prev_y = y;
+    body_dy = susp_t ? susp_body[susp_t - 1] : 0;
+    wheel_dy = y < TRUCK_GROUND ? 1 : 0;
+}
+
 /* ---- 자료 ---- */
 static int find_spr(uint16_t a)
 {
@@ -115,6 +141,8 @@ uint32_t orvga_palgen(void)
 void orvga_mode(int mode)
 {
     (void)mode;
+    susp_t = body_dy = wheel_dy = 0;
+    susp_prev_y = TRUCK_GROUND;
     ninst = 0;
     memset(lab, 0, sizeof lab);
     ctx = C_NONE;
@@ -176,6 +204,7 @@ void orvga_hook(uint32_t at)
         break;
     case 0x0633:
         title = 0;
+        susp_frame();
         break;
     case 0x078B:
         title = 1;
@@ -327,7 +356,7 @@ static void make_tabs(void)
 
 void orvga_frame(uint8_t *dst)
 {
-    int x, y, k, th, lv;
+    int x, y, j, k, th, lv;
     uint16_t smt = DSW(0x417A);
     int scroll_far = smt / 2;
     lv = DSW(0x5368);
@@ -411,6 +440,36 @@ void orvga_frame(uint8_t *dst)
         const uint8_t *tg = gy == 0 ? grass0 : gy == 1 ? grass1 : gndrow[gy];
         memcpy(dst + y * 320, tg + (gscroll & 255), 320);
     }
+    /* 2.5) 살아 있는 스프라이트가 덮는 점 표시 (그 점의 CGA 색은 칠하지 않는다: 스프라이트를
+     *      옮겨 그릴 때(서스펜션) 원래 자리가 비쳐 보이지 않게) */
+    if (++cov_stamp == 0) {
+        memset(cov, 0, sizeof cov);
+        cov_stamp = 1;
+    }
+    for (k = 0; k < ninst; k++) {
+        struct inst *s = &inst[k];
+        int W = s->w * 4;
+        if (!inst_alive(s)) {
+            memmove(inst + k, inst + k + 1, (size_t)(ninst - k - 1) * sizeof inst[0]);
+            ninst--;
+            k--;
+            continue;
+        }
+        for (y = 0; y < s->h; y++) {
+            int sy = s->y + y;
+            if (sy < 0 || sy >= 200)
+                continue;
+            for (x = 0; x < W; x++) {
+                int sx = s->x + x;
+                uint8_t b;
+                if (sx < 0 || sx >= 320)
+                    continue;
+                b = M[DSL + s->addr + y * s->w + (x >> 2)];
+                if ((b >> (6 - 2 * (x & 3))) & 3)
+                    cov[sy * 320 + sx] = cov_stamp;
+            }
+        }
+    }
     /* 3) CGA 화면에서 0 이 아닌 점: 글자 / 그 밖 (땅 띠의 초록은 땅) */
     for (y = 0; y < 200; y++) {
         const uint8_t *src = M + 0xB8000 + (y & 1) * 0x2000 + (y >> 1) * 80;
@@ -436,7 +495,7 @@ void orvga_frame(uint8_t *dst)
                     /* 놀이 화면 위 글자: 오른쪽 아래 1점 그림자 (하늘/산과 떨어지게) */
                     if (y >= 20 && y < 199 && px < 319 && !L[px + 321])
                         d[px + 321] = TEXT_SHADOW;
-                } else if (gnd ? v != 1 : y != ridge[px])
+                } else if ((gnd ? v != 1 : y != ridge[px]) && cov[y * 320 + px] != cov_stamp)
                     d[px] = cga_fallback[v];
             }
         }
@@ -453,14 +512,16 @@ void orvga_frame(uint8_t *dst)
     for (k = 0; k < ninst; k++) {
         struct inst *s = &inst[k];
         int W = s->w * 4;
-        if (!inst_alive(s)) {
-            memmove(inst + k, inst + k + 1, (size_t)(ninst - k - 1) * sizeof inst[0]);
-            ninst--;
-            k--;
-            continue;
-        }
-        for (y = 0; y < s->h; y++) {
-            int sy = s->y + y;
+        for (j = 0; j < s->h; j++) {
+            int sy;
+            /* 트럭은 바퀴(8줄 아래)를 먼저, 차체를 나중에: 내려앉은 차체가 바퀴 윗부분을 덮는다 */
+            if (s->addr == TRUCK_SPR && s->h == 14 && !title) {
+                y = j < 6 ? j + 8 : j - 6;
+                sy = s->y + y + (y >= 8 ? wheel_dy : body_dy);
+            } else {
+                y = j;
+                sy = s->y + y;
+            }
             if (sy < 0 || sy >= 200)
                 continue;
             for (x = 0; x < W; x++) {

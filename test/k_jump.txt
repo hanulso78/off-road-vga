@@ -1,0 +1,5 @@
+3 +3
+8 +space
+13 +space
+40 +space
+60 +up
